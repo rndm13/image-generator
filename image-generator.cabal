@@ -1,0 +1,40 @@
+cabal-version:      2.4
+name:               image-generator
+version:            0.1.0.0
+
+-- A short (one-line) description of the package.
+-- synopsis:
+
+-- A longer description of the package.
+-- description:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+
+-- The license under which the package is released.
+-- license:
+author:             rndm
+maintainer:         alexbaranov47@gmail.com
+
+-- A copyright notice.
+-- copyright:
+-- category:
+extra-source-files: CHANGELOG.md
+
+executable image-generator
+    main-is:          Main.hs
+
+    -- Modules included in this executable, other than Main.
+    other-modules:    Tiles
+
+    -- LANGUAGE extensions used by modules in this package.
+    other-extensions: DerivingStrategies
+
+    build-depends:    base   ^>= 4.15.1.0
+                    , matrix ^>= 0.3.6.1
+                    , vector ^>= 0.13.0.0
+                    , random ^>= 1.2.1.1
+                    , process^>= 1.6.13.2
+                    , split  ^>= 0.2.3.4
+    hs-source-dirs:   src
+    default-language: Haskell2010
