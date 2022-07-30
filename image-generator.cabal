@@ -34,7 +34,11 @@ executable image-generator
                     , matrix ^>= 0.3.6.1
                     , vector ^>= 0.13.0.0
                     , random ^>= 1.2.1.1
+                    , random-shuffle
                     , process^>= 1.6.13.2
                     , split  ^>= 0.2.3.4
+                    , extra  ^>= 1.7.10
+                    , time
+                    , directory
     hs-source-dirs:   src
     default-language: Haskell2010
