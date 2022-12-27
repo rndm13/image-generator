@@ -1,10 +1,7 @@
 module Main (main) where
 
 import qualified System.IO             as SIO
-import qualified System.Process        as P
 import qualified System.Environment    as E
-
-import qualified Control.Monad         as CM
 
 import           Data.Time.Clock.POSIX
 
@@ -25,4 +22,4 @@ main = do
   print . length . allTiles $ lm
 
   SIO.writeFile "generatedImage.ppm" . showMatrix $ generateImage t inputImage sz width height
-  CM.void . P.runCommand $ "gimp generatedImage.ppm " -- <> (args !! 0)
+  -- CM.void . P.runCommand $ "gimp generatedImage.ppm " -- <> (args !! 0)

@@ -4,17 +4,12 @@ module Tiles
        ( Pixel(..), newPixel
        , Image
        , Side(..), allSides
-       , oppositeSide
-       , getSide
        , showMatrix
        , loadImage
-       , mergeImageMap
-       , rotate
        , splitToTileMap
-       , makeLookupMap
-       , makeTileMatcher
        , allTiles
        , generateImage
+       , makeLookupMap
        ) where
 
 import           Data.Char
@@ -25,7 +20,6 @@ import qualified Data.List.Extra       as LE
 import qualified Data.Matrix           as M
 import           Data.Tuple            (swap)
 import qualified Data.Maybe            as Mb
-import qualified Data.Vector           as V
 
 import qualified Control.Monad         as CM
 
@@ -68,19 +62,7 @@ rotate :: M.Matrix a -> M.Matrix a
 rotate im = M.fromLists . L.transpose . (map reverse) . L.transpose . M.toLists . M.transpose $ im
 
 newPixel :: Int -> Int -> Int -> Pixel
-newPixel red green blue = Pixel {r = red, g = green, b = blue}
-
-getSide :: Side -> Image -> V.Vector Pixel
-getSide STop    m = M.getRow 1 m
-getSide SBottom m = M.getRow (M.nrows m) m
-getSide SLeft   m = M.getCol 1 m
-getSide SRight  m = M.getCol (M.ncols m) m
-
-oppositeSide :: Side -> Side
-oppositeSide STop    = SBottom
-oppositeSide SBottom = STop
-oppositeSide SLeft   = SRight
-oppositeSide SRight  = SLeft
+newPixel = Pixel
 
 showMatrix :: (Show a) => M.Matrix a -> String
 showMatrix m = (printf "P3\n%d %d\n255\n" (M.nrows m) (M.ncols m)) ++ L.intercalate "\n" (map (L.intercalate " " . map (show)) (M.toLists m))
