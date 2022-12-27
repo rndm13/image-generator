@@ -1,13 +1,8 @@
 module Main (main) where
 
-import qualified System.Directory      as SD
 import qualified System.IO             as SIO
 import qualified System.Process        as P
-import qualified System.Random         as R
-
-import qualified Data.Matrix           as M
-import qualified Data.Maybe            as Mb
-import qualified Data.List             as L
+import qualified System.Environment    as E
 
 import qualified Control.Monad         as CM
 
@@ -15,18 +10,19 @@ import           Data.Time.Clock.POSIX
 
 import           Tiles
 
-
 main :: IO ()
 main = do
-    let tileDirectory = "./tiles"
-    files <- SD.getDirectoryContents tileDirectory
-    
-    images <- sequenceA $ map (\fileName -> loadImage (tileDirectory ++ "/" ++ fileName) ) $ filter (\n -> (reverse . (take 3) . reverse $ n) == "ppm") files 
-    
-    let fullImages = L.concat . (map ((take 4) . iterate rotate)) $ images
-    
-    t <- ((round . (* 1000000)) <$> getPOSIXTime)
+  args <- E.getArgs
 
-    (SIO.writeFile "generatedImage.ppm") . showMatrix . mergeTileMap $ generateTileMap t fullImages 20 20
-    CM.void $ P.runCommand "gimp generatedImage.ppm"
+  let sz = read (args !! 1) 
+  let width = read (args !! 2)
+  let height = read (args !! 3)
+  inputImage <- loadImage (args !! 0)
 
+  t <- ((round . (* 1000000)) <$> getPOSIXTime)
+  
+  -- let lm = makeLookupMap . splitToTileMap sz $ inputImage 
+  -- CM.mapM_ print $ lm
+
+  SIO.writeFile "generatedImage.ppm" . showMatrix $ generateImage t inputImage sz width height
+  CM.void $ P.runCommand "gimp generatedImage.ppm"

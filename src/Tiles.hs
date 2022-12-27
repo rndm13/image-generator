@@ -9,9 +9,14 @@ module Tiles
        , matchTiles
        , showMatrix
        , loadImage
-       , generateTileMap
+       , generateTileMapTS
        , mergeTileMap
        , rotate
+       , splitToTileMap
+       , makeLookupMap
+       , makeTileMatcher
+       , allTiles
+       , generateImage
        ) where
 
 import           Data.Char
@@ -19,8 +24,8 @@ import qualified Data.List             as L
 import qualified Data.List.Extra       as LE
 import qualified Data.List.Split       as LS
 import qualified Data.Matrix           as M
+import           Data.Tuple            (swap)
 import qualified Data.Maybe            as Mb
-import qualified Data.Tuple            as T
 import qualified Data.Vector           as V
 
 import qualified Control.Monad         as CM
@@ -40,26 +45,24 @@ data Pixel = Pixel { r :: Int
 data Side = SRight
           | SLeft
           | STop
-          | SBottom deriving stock Show
+          | SBottom deriving stock (Show, Eq)
 
 type Image = M.Matrix Pixel
 
 instance Show Pixel where
-  show p = printf "%d %d %d" (r p) (g p) (b p)
+  show (Pixel rp gp bp) = printf "%d %d %d" rp gp bp
 
 instance Read Pixel where
-  readsPrec _ input = if ws1 == ' ' && ws2 == ' ' -- Looks valid
-                      then [(newPixel (read red) (read green) (read blue), rest5)]
+  readsPrec _ input = if isSpace ws1 && isSpace ws2 -- Looks valid 
+                      then [(newPixel (read red) (read green) (read blue), rest5)] 
                       else []
-      where
-    (red,   rest1) = span isDigit input
-    (ws1:   rest2) = rest1
-    (green, rest3) = span isDigit rest2
-    (ws2:   rest4) = rest3
-    (blue,  rest5) = span isDigit rest4
+    where (red,   rest1) = span isDigit input
+          (ws1:   rest2) = rest1
+          (green, rest3) = span isDigit rest2
+          (ws2:   rest4) = rest3
+          (blue,  rest5) = span isDigit rest4
 
-
-rotate :: Image -> Image
+rotate :: M.Matrix a -> M.Matrix a
 rotate im = M.fromLists . L.transpose . (map reverse) . L.transpose . M.toLists . M.transpose $ im
 
 newPixel :: Int -> Int -> Int -> Pixel
@@ -77,7 +80,9 @@ oppositeSide SBottom = STop
 oppositeSide SLeft   = SRight
 oppositeSide SRight  = SLeft
 
-matchTiles :: Side -> Image -> Image -> Bool
+type TileMatcher = Side -> Image -> Image -> Bool
+
+matchTiles :: TileMatcher
 matchTiles s im1 im2 = (getSide s im1) == (getSide (oppositeSide s) im2)
 
 showMatrix :: (Show a) => M.Matrix a -> String
@@ -87,50 +92,105 @@ loadImage  :: SIO.FilePath -> IO Image
 loadImage file = do
     content <- SIO.readFile file
     let w = read ((words content) !! 1) :: Int
-    let h = read ((words content) !! 2) :: Int
-    let numbers = (map (read :: String -> Int)) . words . (L.intercalate "\n") . (L.drop 3) . lines $ content
+    -- let h = read ((words content) !! 2) :: Int
+    let numbers = (map (read :: String -> Int)) . (>>= words) . (L.drop 3) . lines $ content
     return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> newPixel a b c)) . LS.chunksOf 3 $ numbers
 
 findIndexMatrix :: (a -> Bool) -> M.Matrix a -> Maybe (Int,Int)
-findIndexMatrix f matr = CM.join $ L.find Mb.isJust $ M.toList $ M.mapPos func matr
+findIndexMatrix f matr = CM.join . (L.find Mb.isJust) . M.toList $ M.mapPos func matr
     where
   func = (\coord a -> if f a then Just coord else Nothing)
 
-move :: Side -> (Int,Int) -> (Int,Int)
+move :: Side -> (Int, Int) -> (Int, Int)
 move STop    (x, y) = (x,y - 1)
 move SBottom (x, y) = (x,y + 1)
 move SLeft   (x, y) = (x - 1,y)
 move SRight  (x, y) = (x + 1,y)
 
 allSides :: [Side]
-allSides = [STop,SRight,SBottom, SLeft]
+allSides = [STop, SRight, SBottom, SLeft]
 
 adjacentTiles :: M.Matrix [Image] -> (Int,Int) -> [(Side,[Image])]
-adjacentTiles tileMap = (\coord -> map (\(mt,s) -> (s,Mb.fromJust mt)) $ filter (\(t,_) -> Mb.isJust t) $ zip (map (\(x,y) -> M.safeGet x y tileMap) $ map (\s -> move s coord) allSides) allSides)
+adjacentTiles tileMap = 
+  (\coord -> map (\(mt,s) -> (s,Mb.fromJust mt)) $ 
+  filter (\(t,_) -> Mb.isJust t) $
+  zip (map (\(x,y) -> M.safeGet x y tileMap) $
+  map (\s -> move s coord) allSides) allSides)
 
-update :: M.Matrix [Image] -> M.Matrix [Image]
-update tileMap
+updateWith :: TileMatcher -> M.Matrix [Image] -> M.Matrix [Image]
+updateWith tileMatcher tileMap
   | result == tileMap = result
-  | otherwise         = update result
+  | otherwise         = updateWith tileMatcher result
     where
-  doesTileFit   = (\(x,y) tile -> all (\(side, possibleTiles) -> any (matchTiles side tile) possibleTiles) (adjacentTiles tileMap (x,y)))
+  doesTileFit (x,y) tile = all (\(side, possibleTiles) -> any (tileMatcher side tile) possibleTiles) (adjacentTiles tileMap (x,y))
   -- (Int,Int) -> Image -> Bool
   result        = M.mapPos (\(x,y) tiles -> filter (doesTileFit (x,y)) tiles) tileMap
 
-collapse :: M.Matrix [Image] -> Maybe (M.Matrix [Image])
-collapse tileMap
+collapseWith :: TileMatcher -> M.Matrix [Image] -> Maybe (M.Matrix [Image])
+collapseWith tileMatcher tileMap
   | toCollapse == []       = Nothing
   | length toCollapse == 1 = Just tileMap
-  | otherwise = CM.join $ L.find Mb.isJust $ map (\e -> maybe Nothing (collapse . update) $ M.safeSet [e] indexToCollapse tileMap) toCollapse
+  | otherwise = 
+    CM.join . L.find Mb.isJust $ map (\e -> maybe Nothing (collapseWith tileMatcher . updateWith tileMatcher) $ 
+    M.safeSet [e] indexToCollapse tileMap) toCollapse
     where
       toCollapse = LE.minimumOn lengthFunction $ map (LE.minimumOn lengthFunction) $ M.toLists tileMap
       lengthFunction = (\t -> if (length t) > 1 then length t else 9999)
       indexToCollapse = Mb.fromJust $ findIndexMatrix ( == toCollapse) tileMap
 
-generateTileMap :: Int -> [Image] -> Int -> Int -> M.Matrix [Image]
-generateTileMap seed tileSet width height = Mb.fromJust $ collapse $ M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) $ M.matrix width height (\(x,y) -> x+y*width)
+generateTileMapTS :: Int -> [Image] -> Int -> Int -> M.Matrix [Image]
+generateTileMapTS seed tileSet width height = 
+  Mb.fromJust . 
+  collapseWith matchTiles . 
+  M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) .
+  M.matrix width height $ (\(x,y) -> x+y*width)
+
+generateImage :: Int -> Image -> Int -> Int -> Int -> Image
+generateImage seed origImage tileSize width height = 
+  mergeTileMap . 
+  Mb.fromJust .
+  (collapseWith tm) .
+  M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) .
+  M.matrix width height $ (\(x,y) -> x+y*width)
+    where lm = makeLookupMap . (splitToTileMap tileSize) $ origImage
+          tm = makeTileMatcher lm
+          tileSet = allTiles lm
 
 mergeTileMap :: M.Matrix [Image] -> Image
-mergeTileMap tm = (\col -> foldl (M.<->) (head col) (tail col)) $ map (\row -> foldl (M.<|>) (head row) (tail row)) tileMap
-    where
-  tileMap = L.transpose $ map (map (head)) $ M.toLists tm
+mergeTileMap tm = foldl1 (M.<|>) . map (\row -> foldl1 (M.<->) row) $ tileMap
+  where tileMap = L.transpose . M.toLists . fmap (head) $ tm
+
+splitToTileMap :: Int -> Image -> M.Matrix Image
+splitToTileMap size origImage = 
+  M.fromLists . 
+  L.transpose .
+  (map (  
+    (map M.fromLists) .          
+    L.transpose .               
+    (map (LS.chunksOf size)))) .
+  LS.chunksOf size .   
+  M.toLists $ origImage
+
+groupValues :: (Eq k) => [(k,v)] -> [(k, [v])]
+groupValues [] = []
+groupValues ((curK, curV):rest) = (curK, curV:(map snd sameK)):(groupValues difK)
+  where (sameK, difK) = L.partition (\a -> fst a == curK) rest
+
+makeLookupMap :: M.Matrix Image -> [((Image,Image), [Side])] 
+makeLookupMap tm = complete
+  where ltor = L.nub $ (M.toLists tileMap) >>= (\a -> zip a (tail a)) 
+        utob = L.nub $ (L.transpose . M.toLists $ tileMap) >>= (\a -> zip a (tail a)) 
+        complete = 
+          groupValues $
+          (zip ltor (repeat SRight)) <>
+          (zip (map (swap) ltor) (repeat SLeft)) <>
+          (zip utob (repeat SBottom)) <>
+          (zip (map (swap) utob) (repeat STop))
+        tileMap = -- M.transpose
+                  tm
+
+allTiles :: [((Image,Image), [Side])] -> [Image]
+allTiles input = L.nub (input >>= ((\a -> [fst a, snd a]) . fst))
+
+makeTileMatcher :: [((Image, Image), [Side])] -> TileMatcher
+makeTileMatcher lookupList = (\side im1 im2 -> any (elem side) (lookup (im1, im2) lookupList))
