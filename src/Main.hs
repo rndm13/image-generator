@@ -14,15 +14,15 @@ main :: IO ()
 main = do
   args <- E.getArgs
 
-  let sz = read (args !! 1) 
-  let width = read (args !! 2)
-  let height = read (args !! 3)
   inputImage <- loadImage (args !! 0)
+  let sz      = read (args !! 1) 
+  let width   = read (args !! 2)
+  let height  = read (args !! 3)
 
   t <- ((round . (* 1000000)) <$> getPOSIXTime)
   
-  -- let lm = makeLookupMap . splitToTileMap sz $ inputImage 
-  -- CM.mapM_ print $ lm
+  let lm = makeLookupMap . splitToTileMap sz $ inputImage 
+  print . length . allTiles $ lm
 
   SIO.writeFile "generatedImage.ppm" . showMatrix $ generateImage t inputImage sz width height
-  CM.void $ P.runCommand "gimp generatedImage.ppm"
+  CM.void . P.runCommand $ "gimp generatedImage.ppm " -- <> (args !! 0)

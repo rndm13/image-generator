@@ -30,15 +30,21 @@ executable image-generator
     -- LANGUAGE extensions used by modules in this package.
     other-extensions: DerivingStrategies
 
-    build-depends:    base    ^>= 4.17.0.0
-                    , matrix  ^>= 0.3.6.1
-                    , vector  ^>= 0.13.0.0
-                    , random  ^>= 1.2.1.1
-                    , random-shuffle
-                    , process ^>= 1.6.13.2
-                    , split   ^>= 0.2.3.4
-                    , extra   ^>= 1.7.10
-                    , time
-                    , directory
+    build-depends:
+        base    ^>= 4.17.0.0
+      , matrix  ^>= 0.3.6.1
+      , vector  ^>= 0.13.0.0
+      , random  ^>= 1.2.1.1
+      , random-shuffle
+      , process ^>= 1.6.13.2
+      , split   ^>= 0.2.3.4
+      , extra   ^>= 1.7.10
+      , time
     hs-source-dirs:   src
     default-language: Haskell2010
+    ghc-options: 
+      -O2
+      -threaded
+--      -prof
+--      -fprof-auto
+--      "-with-rtsopts=-N -p -s -hT -i0.1"
