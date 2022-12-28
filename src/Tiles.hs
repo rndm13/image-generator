@@ -1,15 +1,18 @@
 {-# LANGUAGE DerivingStrategies #-}
 
 module Tiles
-       ( Pixel(..), newPixel
+       ( Pixel(..)
        , Image
        , Side(..), allSides
        , showMatrix
        , loadImage
-       , splitToTileMap
+       , splitImageMap
        , allTiles
-       , generateImage
+       , genImageM
+       , genImage
        , makeLookupMap
+       , mergeImageMap
+       , allRotations
        ) where
 
 import           Data.Char
@@ -50,7 +53,7 @@ instance Show Pixel where
 
 instance Read Pixel where
   readsPrec _ input = if isSpace ws1 && isSpace ws2 -- Looks valid 
-                      then [(newPixel (read red) (read green) (read blue), rest5)] 
+                      then [(Pixel (read red) (read green) (read blue), rest5)] 
                       else []
     where (red,   rest1) = span isDigit input
           (ws1:   rest2) = rest1
@@ -59,20 +62,17 @@ instance Read Pixel where
           (blue,  rest5) = span isDigit rest4
 
 rotate :: M.Matrix a -> M.Matrix a
-rotate im = M.fromLists . L.transpose . (map reverse) . L.transpose . M.toLists . M.transpose $ im
-
-newPixel :: Int -> Int -> Int -> Pixel
-newPixel = Pixel
+rotate im = M.fromLists . L.transpose . (map reverse) . M.toLists $ im
 
 showMatrix :: (Show a) => M.Matrix a -> String
-showMatrix m = (printf "P3\n%d %d\n255\n" (M.nrows m) (M.ncols m)) ++ L.intercalate "\n" (map (L.intercalate " " . map (show)) (M.toLists m))
+showMatrix m = (printf "P3\n%d %d\n255\n" (M.ncols m) (M.nrows m)) ++ L.intercalate "\n" (map (L.intercalate " " . map (show)) (M.toLists m))
 
 loadImage  :: SIO.FilePath -> IO Image
 loadImage file = do
-    content <- SIO.readFile file
+    content <- L.intercalate "\n" . filter ((/='#') . head) . lines <$> SIO.readFile file
     let w = read ((words content) !! 1) :: Int
     let numbers = (map (read :: String -> Int)) . (>>= words) . (L.drop 3) . lines $ content
-    return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> newPixel a b c)) . LS.chunksOf 3 $ numbers
+    return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> Pixel a b c)) . LS.chunksOf 3 $ numbers
 
 findIndexMatrix :: (a -> Bool) -> M.Matrix a -> Maybe (Int,Int)
 findIndexMatrix f matr = CM.join . (L.find Mb.isJust) . M.toList $ M.mapPos func matr
@@ -106,54 +106,70 @@ updateWith tileMatcher tileMap
 
 collapseWith :: TileMatcher -> M.Matrix [Tile] -> Maybe (M.Matrix [Tile])
 collapseWith tileMatcher tileMap
-  | toCollapse        == [] = Nothing
+  | null toCollapse         = Nothing
   | length toCollapse == 1  = Just tileMap
   | otherwise = 
     CM.join . 
     L.find Mb.isJust $ 
-    map (\e -> M.safeSet [e] indexToCollapse tileMap >>= 
-               (collapseWith tileMatcher . updateWith tileMatcher)) toCollapse
+    map (\e -> (M.safeSet [e] indexToCollapse tileMap) >>= (collapseWith tileMatcher . updateWith tileMatcher)) toCollapse
     where
-      toCollapse = L.minimumBy (comparing lengthFunction) tileMap 
-      lengthFunction t = if (length t) > 1 then length t else 9999
-      indexToCollapse = Mb.fromJust $ findIndexMatrix ( == toCollapse) tileMap
+      lengthFunction t = (\a -> if a <= 1 then 9999 else a) . length $ t
+      indexToCollapse  = Mb.fromJust $ findIndexMatrix ( == toCollapse) tileMap
+      toCollapse       = L.minimumBy (comparing lengthFunction) tileMap 
 
 missingTexture :: Int -> Image
 missingTexture size = M.matrix size size (const (Pixel 82 0 100))
 
-generateImage :: Int -> Image -> Int -> Int -> Int -> Image
-generateImage seed origImage tileSize width height = 
+allRotations :: Image -> [Image]
+allRotations origImage = take 4 . iterate rotate $ origImage
+
+genImageM :: Int -> [Image] -> Int -> Int -> Int -> Image
+genImageM seed origImage tileSize width height = 
   mergeImageMap . 
   fmap (\e -> L.singleton . maybe (missingTexture tileSize) fst $ idll LE.!? (head e)) .
-  Mb.fromJust . -- M.Matrix [Tile]
+  Mb.fromJust . 
   collapseWith matcher . 
   M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) .
   M.matrix width height $ (\(x,y) -> x+y*width)
-    where imageMap = splitToTileMap tileSize origImage
-          lm = makeLookupMap idMap 
-          idll = makeIdLookupList imageMap
-          idMap = fmap (\e -> maybe 0 id $ lookup e idll) imageMap
+    where imageMap = map (splitImageMap tileSize) $ origImage
+          lm      = idMap >>= makeLookupMap 
+          idll    = imageMap >>= makeIdLookupList
+          idMap   = map (fmap (\e -> maybe (-1) id $ lookup e idll)) imageMap
+          matcher = makeTileMatcher lm
+          tileSet = map (snd) idll
+
+genImage :: Int -> Image -> Int -> Int -> Int -> Image
+genImage seed origImage tileSize width height = 
+  mergeImageMap . 
+  fmap (\e -> L.singleton . maybe (missingTexture tileSize) fst $ idll LE.!? (head e)) .
+  Mb.fromJust . 
+  collapseWith matcher . 
+  M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) .
+  M.matrix width height $ (\(x,y) -> x+y*width)
+    where imageMap = splitImageMap tileSize origImage
+          lm      = makeLookupMap idMap
+          idll    = makeIdLookupList imageMap 
+          idMap   = fmap (\e -> maybe (-1) id $ lookup e idll) imageMap
           matcher = makeTileMatcher lm
           tileSet = map (snd) idll
 
 mergeImageMap :: M.Matrix [Image] -> Image
-mergeImageMap tm = foldl1 (M.<|>) . map (\row -> foldl1 (M.<->) row) $ tileMap
-  where tileMap = L.transpose . M.toLists . fmap (head) $ tm
+mergeImageMap tm = foldl1 (M.<|>) . map (foldl1 (M.<->)) $ tileMap
+  where tileMap = M.toLists . fmap (head) $ tm
 
-splitToTileMap :: Int -> Image -> M.Matrix Image
-splitToTileMap size origImage = 
+splitImageMap :: Int -> Image -> M.Matrix Image
+splitImageMap size origImage = 
   M.fromLists . 
-  L.transpose .
-  (map (  
-    (map M.fromLists) .          
-    L.transpose .               
-    (map (LS.chunksOf size)))) .
-  LS.chunksOf size .   
+  map 
+    (map M.fromLists . 
+    L.transpose .
+    map (LS.chunksOf size)) .
+  LS.chunksOf size .
   M.toLists $ origImage
 
-groupValues :: (Eq k) => [(k,v)] -> [(k, [v])]
+groupValues :: (Eq k, Eq v) => [(k,v)] -> [(k, [v])]
 groupValues [] = []
-groupValues ((curK, curV):rest) = (curK, curV:(map snd sameK)):(groupValues difK)
+groupValues ((curK, curV):rest) = (curK, L.nub $ curV:(map snd sameK)):(groupValues difK)
   where (sameK, difK) = L.partition (\a -> fst a == curK) rest
 
 makeIdLookupList :: M.Matrix Image -> [(Image, Int)]
@@ -165,7 +181,7 @@ makeIdLookupList tileMap =
 makeLookupMap :: (Eq a) => M.Matrix a -> [((a,a), [Side])] 
 makeLookupMap tm = complete
   where ltor = L.nub $ (M.toLists tileMap) >>= (\a -> zip a (tail a)) 
-        utob = L.nub $ (L.transpose . M.toLists $ tileMap) >>= (\a -> zip a (tail a)) 
+        utob = L.nub $ (M.toLists . M.transpose $ tileMap) >>= (\a -> zip a (tail a)) 
         complete = 
           groupValues $
           (zip ltor (repeat SRight)) <>

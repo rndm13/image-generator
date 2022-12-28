@@ -45,6 +45,6 @@ executable image-generator
     ghc-options: 
       -O2
       -threaded
-    --  -prof
-    --  -fprof-auto
-    --  "-with-rtsopts=-N -p -s -hT -i0.1"
+      -prof
+      -fprof-auto
+      "-with-rtsopts=-N -p -s -hT -i0.1"
