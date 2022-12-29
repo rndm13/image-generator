@@ -16,7 +16,6 @@ module Tiles
        ) where
 
 import           Data.Char
-import           Data.Ord
 import qualified Data.List             as L
 import qualified Data.List.Split       as LS
 import qualified Data.List.Extra       as LE
@@ -46,7 +45,7 @@ data Side = SRight
 
 type Image = M.Matrix Pixel
 type Tile = Int
-type TileMatcher = Side -> Tile -> Tile -> Bool
+type TileMatcher = M.Matrix [Side]
 
 instance Show Pixel where
   show (Pixel rp gp bp) = printf "%d %d %d" rp gp bp
@@ -71,13 +70,8 @@ loadImage  :: SIO.FilePath -> IO Image
 loadImage file = do
     content <- L.intercalate "\n" . filter ((/='#') . head) . lines <$> SIO.readFile file
     let w = read ((words content) !! 1) :: Int
-    let numbers = (map (read :: String -> Int)) . (>>= words) . (L.drop 3) . lines $ content
+    let numbers = (map (read)) . (>>= words) . (L.drop 3) . lines $ content
     return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> Pixel a b c)) . LS.chunksOf 3 $ numbers
-
-findIndexMatrix :: (a -> Bool) -> M.Matrix a -> Maybe (Int,Int)
-findIndexMatrix f matr = CM.join . (L.find Mb.isJust) . M.toList $ M.mapPos func matr
-    where
-  func = (\coord a -> if f a then Just coord else Nothing)
 
 move :: Side -> (Int, Int) -> (Int, Int)
 move STop    (x, y) = (x,y - 1)
@@ -92,30 +86,40 @@ adjacentTiles :: M.Matrix a -> (Int,Int) -> [(Side,a)]
 adjacentTiles tileMap coord = 
   map (\(mt,s) -> (s,Mb.fromJust mt)) .
   filter (\(t,_) -> Mb.isJust t) .
-  zip (
-    map (\(x,y) -> M.safeGet x y tileMap) . 
-    map (\s -> move s coord) $ allSides) $ allSides
+  zip (map (\(x,y) -> M.safeGet x y tileMap) . 
+       map (\s -> move s coord) $ allSides) $ allSides
 
 updateWith :: TileMatcher -> M.Matrix [Tile] -> M.Matrix [Tile]
 updateWith tileMatcher tileMap
   | result == tileMap = result
   | otherwise         = updateWith tileMatcher result
-    where
-  doesTileFit (x,y) tile = all (\(side, possibleTiles) -> any (tileMatcher side tile) possibleTiles) (adjacentTiles tileMap (x,y))
-  result        = M.mapPos (\(x,y) tiles -> filter (doesTileFit (x,y)) tiles) tileMap
+    where doesTileFit (x,y) tile = all (\(side, possibleTiles) -> any (match tileMatcher side tile) possibleTiles) (adjacentTiles tileMap (x,y))
+          result                 = M.mapPos (\p -> filter (doesTileFit p)) tileMap
+
+-- The ugly part
+getMin0Matrix' :: (a -> Int) -> [(a, (Int,Int))] -> (a, (Int, Int))
+getMin0Matrix' _ [] = error "Matrix should always have an element"
+getMin0Matrix' _ (cur:[]) = cur
+getMin0Matrix' func (cur:rest) 
+  | (func . fst $ cur) == 0 = cur
+  | ((func . fst $ restMin0Matrix) < (func . fst $ cur)) = restMin0Matrix 
+  | otherwise = cur
+  where restMin0Matrix = getMin0Matrix' func rest
+
+getMin0Matrix :: (a -> Int) -> M.Matrix a -> (a, (Int,Int))
+getMin0Matrix func matr = getMin0Matrix' func list
+  where list = zip (M.toList $ matr) [(x,y) | x <- [1..M.ncols matr], y <- [1..M.nrows matr]]
 
 collapseWith :: TileMatcher -> M.Matrix [Tile] -> Maybe (M.Matrix [Tile])
 collapseWith tileMatcher tileMap
-  | null toCollapse         = Nothing
-  | length toCollapse == 1  = Just tileMap
+  | null toCollapse          = Nothing
+  | null . tail $ toCollapse = Just tileMap
   | otherwise = 
     CM.join . 
     L.find Mb.isJust $ 
     map (\e -> (M.safeSet [e] indexToCollapse tileMap) >>= (collapseWith tileMatcher . updateWith tileMatcher)) toCollapse
-    where
-      lengthFunction t = (\a -> if a <= 1 then 9999 else a) . length $ t
-      indexToCollapse  = Mb.fromJust $ findIndexMatrix ( == toCollapse) tileMap
-      toCollapse       = L.minimumBy (comparing lengthFunction) tileMap 
+    where lengthFunction t = (\a -> if a == 1 then 9999 else a) . length $ t
+          (toCollapse, indexToCollapse) = getMin0Matrix lengthFunction tileMap
 
 missingTexture :: Int -> Image
 missingTexture size = M.matrix size size (const (Pixel 82 0 100))
@@ -193,7 +197,10 @@ makeLookupMap tm = complete
 allTiles :: (Eq a) => [((a,a), [Side])] -> [a]
 allTiles input = L.nub (input >>= ((\a -> [fst a, snd a]) . fst))
 
+match :: TileMatcher -> Side -> Tile -> Tile -> Bool
+match mtrx side im1 im2 = elem side (mtrx M.! ((im1 + 1), (im2 + 1)))
+
 makeTileMatcher :: [((Tile, Tile), [Side])] -> TileMatcher
-makeTileMatcher lookupList = (\side im1 im2 -> elem side (mtrx M.! ((im1 + 1), (im2 + 1))))
+makeTileMatcher lookupList = mtrx
   where size = length . allTiles $ lookupList
         mtrx = M.matrix size size (\(x,y) -> maybe [] id $ lookup ((x - 1), (y - 1)) lookupList) 

@@ -45,6 +45,9 @@ executable image-generator
     ghc-options: 
       -O2
       -threaded
-      -prof
-      -fprof-auto
-      "-with-rtsopts=-N -p -s -hT -i0.1"
+      -funfolding-use-threshold=16 
+      -optc-O3
+      -optc-ffast-math
+      -- -prof
+      -- -fprof-auto
+      -- "-with-rtsopts=-N -p -s -hT -i0.1"
