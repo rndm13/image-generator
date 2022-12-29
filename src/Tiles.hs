@@ -1,21 +1,22 @@
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingStrategies, OverloadedStrings #-}
 
 module Tiles
        ( Pixel(..)
        , Image
        , Side(..), allSides
-       , showMatrix
+       , showImage
        , loadImage
        , splitImageMap
        , allTiles
-       , genImageM
        , genImage
+       , extImage
        , makeLookupMap
        , mergeImageMap
        , allRotations
        ) where
 
-import           Data.Char
+import qualified Data.Text             as T
+import qualified Data.Text.Read        as TR
 import qualified Data.List             as L
 import qualified Data.List.Split       as LS
 import qualified Data.List.Extra       as LE
@@ -25,6 +26,7 @@ import qualified Data.Maybe            as Mb
 
 import qualified Control.Monad         as CM
 
+import qualified Data.Text.IO          as TIO
 import qualified System.IO             as SIO
 
 import qualified System.Random         as R
@@ -47,30 +49,27 @@ type Image = M.Matrix Pixel
 type Tile = Int
 type TileMatcher = M.Matrix [Side]
 
-instance Show Pixel where
-  show (Pixel rp gp bp) = printf "%d %d %d" rp gp bp
+showPixel :: Pixel -> T.Text
+showPixel (Pixel rp gp bp) = T.pack . printf "%d %d %d\n" rp gp $ bp
 
-instance Read Pixel where
-  readsPrec _ input = if isSpace ws1 && isSpace ws2 -- Looks valid 
-                      then [(Pixel (read red) (read green) (read blue), rest5)] 
-                      else []
-    where (red,   rest1) = span isDigit input
-          (ws1:   rest2) = rest1
-          (green, rest3) = span isDigit rest2
-          (ws2:   rest4) = rest3
-          (blue,  rest5) = span isDigit rest4
+showImage :: Image -> T.Text
+showImage m = 
+  T.append 
+    (T.pack $ printf "P3\n%d %d\n255\n" (M.ncols m) (M.nrows m))
+    (T.intercalate "\n" (map (T.intercalate " ") ( M.toLists . fmap showPixel $ m)))
 
 rotate :: M.Matrix a -> M.Matrix a
-rotate im = M.fromLists . L.transpose . (map reverse) . M.toLists $ im
+rotate im = M.transpose . M.fromLists . (map reverse) . M.toLists $ im
 
-showMatrix :: (Show a) => M.Matrix a -> String
-showMatrix m = (printf "P3\n%d %d\n255\n" (M.ncols m) (M.nrows m)) ++ L.intercalate "\n" (map (L.intercalate " " . map (show)) (M.toLists m))
+fromRight :: Either a b -> b
+fromRight (Right v) = v
+fromRight (Left  _) = error "fromRight call on Left value`"
 
 loadImage  :: SIO.FilePath -> IO Image
 loadImage file = do
-    content <- L.intercalate "\n" . filter ((/='#') . head) . lines <$> SIO.readFile file
-    let w = read ((words content) !! 1) :: Int
-    let numbers = (map (read)) . (>>= words) . (L.drop 3) . lines $ content
+    content <- (filter ((/='#') . T.head) . T.lines <$> TIO.readFile file) :: IO [T.Text]
+    let (w, _) = fromRight . TR.decimal $ (content !! 1)
+    let numbers = fmap (fst . fromRight . TR.decimal) . (drop 3) $ content
     return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> Pixel a b c)) . LS.chunksOf 3 $ numbers
 
 move :: Side -> (Int, Int) -> (Int, Int)
@@ -124,38 +123,40 @@ collapseWith tileMatcher tileMap
 missingTexture :: Int -> Image
 missingTexture size = M.matrix size size (const (Pixel 82 0 100))
 
-allRotations :: Image -> [Image]
+allRotations :: M.Matrix a -> [M.Matrix a]
 allRotations origImage = take 4 . iterate rotate $ origImage
 
-genImageM :: Int -> [Image] -> Int -> Int -> Int -> Image
-genImageM seed origImage tileSize width height = 
-  mergeImageMap . 
-  fmap (\e -> L.singleton . maybe (missingTexture tileSize) fst $ idll LE.!? (head e)) .
-  Mb.fromJust . 
-  collapseWith matcher . 
-  M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) .
-  M.matrix width height $ (\(x,y) -> x+y*width)
-    where imageMap = map (splitImageMap tileSize) $ origImage
-          lm      = idMap >>= makeLookupMap 
-          idll    = imageMap >>= makeIdLookupList
-          idMap   = map (fmap (\e -> maybe (-1) id $ lookup e idll)) imageMap
-          matcher = makeTileMatcher lm
-          tileSet = map (snd) idll
-
-genImage :: Int -> Image -> Int -> Int -> Int -> Image
+genImage :: Int -> [Image] -> Int -> Int -> Int -> Image
 genImage seed origImage tileSize width height = 
   mergeImageMap . 
   fmap (\e -> L.singleton . maybe (missingTexture tileSize) fst $ idll LE.!? (head e)) .
   Mb.fromJust . 
   collapseWith matcher . 
-  M.mapPos (\_ n -> RS.shuffle' tileSet (length tileSet) (R.mkStdGen (seed + n))) .
-  M.matrix width height $ (\(x,y) -> x+y*width)
+  M.matrix width height $ (\(x, y) -> RS.shuffle' tileSet (length tileSet) (genFn x y)) 
+    where imageMap = map (splitImageMap tileSize) $ origImage
+          idll    = imageMap >>= makeIdLookupList
+          idMap   = map (fmap (\e -> maybe (-1) id $ lookup e idll)) imageMap
+          lm      = idMap >>= makeLookupMap 
+          matcher = makeTileMatcher lm
+          tileSet = allTiles lm 
+          genFn x y = R.mkStdGen (seed + (x + y * width))
+
+extImage :: Int -> Image -> Int -> Int -> Int -> Image
+extImage seed origImage tileSize width height =
+  mergeImageMap . 
+  fmap (\e -> L.singleton . maybe (missingTexture tileSize) fst $ idll LE.!? (head e)) .
+  Mb.fromJust . 
+  collapseWith matcher . 
+  M.mapPos (\(x, y) tiles -> RS.shuffle' tiles (length tiles) (genFn x y)) .
+  M.extendTo tileSet ((M.nrows idMap) + width) ((M.ncols idMap) + height) .
+  fmap L.singleton . M.transpose $ idMap
     where imageMap = splitImageMap tileSize origImage
           lm      = makeLookupMap idMap
           idll    = makeIdLookupList imageMap 
           idMap   = fmap (\e -> maybe (-1) id $ lookup e idll) imageMap
           matcher = makeTileMatcher lm
-          tileSet = map (snd) idll
+          tileSet = allTiles lm
+          genFn x y = R.mkStdGen (seed + (x + y * (M.ncols idMap + width * tileSize)))
 
 mergeImageMap :: M.Matrix [Image] -> Image
 mergeImageMap tm = foldl1 (M.<|>) . map (foldl1 (M.<->)) $ tileMap

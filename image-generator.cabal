@@ -28,7 +28,9 @@ executable image-generator
     other-modules:    Tiles
 
     -- LANGUAGE extensions used by modules in this package.
-    other-extensions: DerivingStrategies
+    other-extensions: 
+        DerivingStrategies
+      , OverloadedStrings
 
     build-depends:
         base    ^>= 4.17.0.0
@@ -39,7 +41,9 @@ executable image-generator
       , process ^>= 1.6.13.2
       , split   ^>= 0.2.3.4
       , extra   ^>= 1.7.10
+      , strict
       , time
+      , text
     hs-source-dirs:   src
     default-language: Haskell2010
     ghc-options: 
@@ -48,6 +52,6 @@ executable image-generator
       -funfolding-use-threshold=16 
       -optc-O3
       -optc-ffast-math
-      -- -prof
-      -- -fprof-auto
-      -- "-with-rtsopts=-N -p -s -hT -i0.1"
+      -prof
+      -fprof-auto
+      "-with-rtsopts=-N -p -s -hT -i0.1"
