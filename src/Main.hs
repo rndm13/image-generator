@@ -21,7 +21,7 @@ import           Tiles
 printUsage :: IO ()
 printUsage = do
   putStrLn "Usage:"
-  putStrLn "  image-generator [gen|ext] tile-size width height [OPTIONS] image1.ppm [image2.ppm ...]"
+  putStrLn "  image-generator (gen|ext) tile-size width height [OPTIONS] image1.ppm [image2.ppm ...]"
   putStrLn "  Options:"
   putStrLn "    -R or --rotations    Use all rotations of input images as new input."
   putStrLn "    -o=output-file.ppm   Write output to a file instead of stdout"
@@ -85,8 +85,8 @@ main = do
     t <- ((round . (* 1000000)) <$> getPOSIXTime)
 
     let out = case mode of {
-       Generate -> (genImage t inputImages sz width height);
-       Extend   -> (extImage t (head inputImages) sz width height); }
+      Generate -> (genImage t inputImages sz width height);
+      Extend   -> (extImage t (head inputImages) sz width height); }
 
     let outfile = case (L.find (isOutput) options) of {
       Just (Output str) -> str;

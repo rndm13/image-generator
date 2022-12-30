@@ -100,7 +100,7 @@ updateWith tileMatcher tileMap
 
 -- The ugly part
 getMin0Matrix' :: (a -> Int) -> [(a, (Int,Int))] -> (a, (Int, Int))
-getMin0Matrix' _ [] = error "Matrix should always have an element"
+getMin0Matrix' _ [] = error "matrix should always have an element"
 getMin0Matrix' _ (cur:[]) = cur
 getMin0Matrix' func (cur:rest) 
   | (func . fst $ cur) == 0 = cur
