@@ -6,6 +6,7 @@ module Tiles
        , Side(..), allSides
        , showImage
        , loadImage
+       , saveImage
        , splitImageMap
        , allTiles
        , genImage
@@ -70,6 +71,9 @@ loadImage file = do
     let (w, _) = fromRight . TR.decimal $ (content !! 1)
     let numbers = fmap (fst . fromRight . TR.decimal) . (drop 3) $ content
     return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> Pixel a b c)) . LS.chunksOf 3 $! numbers
+
+saveImage :: SIO.FilePath -> Image -> IO ()
+saveImage fp = TIO.writeFile fp . showImage
 
 move :: Side -> (Int, Int) -> (Int, Int)
 move STop    (x, y) = (x,y - 1)
@@ -184,7 +188,6 @@ makeIdLookupList :: (Eq a) => [a] -> [(a, Int)]
 makeIdLookupList = 
   (flip zip) [0..] .
   L.nub
-
 makeLookupMap :: (Eq a) => M.Matrix a -> [((a,a), [Side])] 
 makeLookupMap tm = complete
   where ltor = L.nub $ (M.toLists tileMap) >>= (\a -> zip a (tail a)) 
