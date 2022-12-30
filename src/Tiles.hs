@@ -32,10 +32,11 @@ import qualified System.Random.Shuffle as RS
 
 import           Text.Printf
 
-data Pixel = Pixel { r :: Int
-                   , g :: Int
-                   , b :: Int
-                   } deriving stock Eq
+data Pixel = Pixel 
+  { r :: Int
+  , g :: Int
+  , b :: Int
+  } deriving stock Eq
 
 data Side = SRight
           | SLeft
@@ -135,12 +136,12 @@ genImage seed origImage tileSize width height =
   Mb.fromJust . 
   collapseWith matcher . 
   M.matrix width height $ (\(x, y) -> RS.shuffle' tileSet (length tileSet) (genFn x y)) 
-    where imageMap = map (splitImageMap tileSize) $ origImage
-          idll    = imageMap >>= makeIdLookupList
-          idMap   = map (fmap (\e -> maybe (-1) id $ lookup e idll)) imageMap
-          lm      = idMap >>= makeLookupMap 
-          matcher = makeTileMatcher lm
-          tileSet = allTiles lm 
+    where imageMap = map (splitImageMap tileSize) origImage
+          lm       = (idMap >>= makeLookupMap) :: [((ImageId, ImageId), [Side])]
+          idll     = makeIdLookupList $ imageMap >>= M.toList
+          idMap    = map (fmap (\e -> maybe (-1) id . lookup e $ idll)) imageMap
+          matcher  = makeTileMatcher lm
+          tileSet  = map (snd) idll 
           genFn x y = R.mkStdGen (seed + (x + y * width))
 
 extImage :: Int -> Image -> Int -> Int -> Int -> Image
@@ -153,11 +154,11 @@ extImage seed origImage tileSize width height =
   M.extendTo tileSet ((M.nrows idMap) + width) ((M.ncols idMap) + height) .
   fmap L.singleton . M.transpose $ idMap
     where imageMap = splitImageMap tileSize origImage
-          lm      = makeLookupMap idMap
-          idll    = makeIdLookupList imageMap 
-          idMap   = fmap (\e -> maybe (-1) id $ lookup e idll) imageMap
-          matcher = makeTileMatcher lm
-          tileSet = allTiles lm
+          lm       = makeLookupMap idMap
+          idll     = makeIdLookupList . M.toList $ imageMap 
+          idMap    = fmap (\e -> maybe (-1) id $ lookup e idll) imageMap
+          matcher  = makeTileMatcher lm
+          tileSet  = map (snd) idll
           genFn x y = R.mkStdGen (seed + (x + y * (M.ncols idMap + width * tileSize)))
 
 mergeImageMap :: M.Matrix [Image] -> Image
@@ -179,11 +180,10 @@ groupValues [] = []
 groupValues ((curK, curV):rest) = (curK, L.nub $ curV:(map snd sameK)):(groupValues difK)
   where (sameK, difK) = L.partition (\a -> fst a == curK) rest
 
-makeIdLookupList :: M.Matrix Image -> [(Image, Int)]
-makeIdLookupList tileMap = 
+makeIdLookupList :: (Eq a) => [a] -> [(a, Int)]
+makeIdLookupList = 
   (flip zip) [0..] .
-  allTiles . 
-  makeLookupMap $ tileMap
+  L.nub
 
 makeLookupMap :: (Eq a) => M.Matrix a -> [((a,a), [Side])] 
 makeLookupMap tm = complete
@@ -197,7 +197,7 @@ makeLookupMap tm = complete
           (zip (map (swap) utob) (repeat STop))
         tileMap = tm
 
-allTiles :: (Eq a) => [((a,a), [Side])] -> [a]
+allTiles :: (Eq a) => [((a,a), b)] -> [a]
 allTiles input = L.nub (input >>= ((\a -> [fst a, snd a]) . fst))
 
 match :: TileMatcher -> Side -> ImageId -> ImageId -> Bool
