@@ -13,6 +13,7 @@ version:            0.1.0.0
 
 -- The license under which the package is released.
 -- license:
+
 author:             rndm
 maintainer:         alexbaranov47@gmail.com
 
@@ -52,6 +53,6 @@ executable image-generator
       -funfolding-use-threshold=16 
       -optc-O3
       -optc-ffast-math
-      -prof
-      -fprof-auto
-      "-with-rtsopts=-N -p -s -hT -i0.1"
+    --  -prof
+    --  -fprof-auto
+    --  "-with-rtsopts=-N -p -s -hT -i0.1"

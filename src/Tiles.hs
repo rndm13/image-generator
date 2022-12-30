@@ -24,8 +24,6 @@ import qualified Data.Matrix           as M
 import           Data.Tuple            (swap)
 import qualified Data.Maybe            as Mb
 
-import qualified Control.Monad         as CM
-
 import qualified Data.Text.IO          as TIO
 import qualified System.IO             as SIO
 
@@ -46,7 +44,7 @@ data Side = SRight
           deriving stock (Show, Eq)
 
 type Image = M.Matrix Pixel
-type Tile = Int
+type ImageId = Int
 type TileMatcher = M.Matrix [Side]
 
 showPixel :: Pixel -> T.Text
@@ -56,21 +54,21 @@ showImage :: Image -> T.Text
 showImage m = 
   T.append 
     (T.pack $ printf "P3\n%d %d\n255\n" (M.ncols m) (M.nrows m))
-    (T.intercalate "\n" (map (T.intercalate " ") ( M.toLists . fmap showPixel $ m)))
+    (T.unlines (map (T.unwords) . M.toLists . fmap showPixel $ m))
 
 rotate :: M.Matrix a -> M.Matrix a
 rotate im = M.transpose . M.fromLists . (map reverse) . M.toLists $ im
 
 fromRight :: Either a b -> b
 fromRight (Right v) = v
-fromRight (Left  _) = error "fromRight call on Left value`"
+fromRight (Left  _) = error "fromRight call on Left value"
 
 loadImage  :: SIO.FilePath -> IO Image
 loadImage file = do
     content <- (filter ((/='#') . T.head) . T.lines <$> TIO.readFile file) :: IO [T.Text]
     let (w, _) = fromRight . TR.decimal $ (content !! 1)
     let numbers = fmap (fst . fromRight . TR.decimal) . (drop 3) $ content
-    return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> Pixel a b c)) . LS.chunksOf 3 $ numbers
+    return . M.fromLists . (LS.chunksOf w) . (map (\[a,b,c] -> Pixel a b c)) . LS.chunksOf 3 $! numbers
 
 move :: Side -> (Int, Int) -> (Int, Int)
 move STop    (x, y) = (x,y - 1)
@@ -88,7 +86,7 @@ adjacentTiles tileMap coord =
   zip (map (\(x,y) -> M.safeGet x y tileMap) . 
        map (\s -> move s coord) $ allSides) $ allSides
 
-updateWith :: TileMatcher -> M.Matrix [Tile] -> M.Matrix [Tile]
+updateWith :: TileMatcher -> M.Matrix [ImageId] -> M.Matrix [ImageId]
 updateWith tileMatcher tileMap
   | result == tileMap = result
   | otherwise         = updateWith tileMatcher result
@@ -109,14 +107,18 @@ getMin0Matrix :: (a -> Int) -> M.Matrix a -> (a, (Int,Int))
 getMin0Matrix func matr = getMin0Matrix' func list
   where list = zip (M.toList $ matr) [(x,y) | x <- [1..M.ncols matr], y <- [1..M.nrows matr]]
 
-collapseWith :: TileMatcher -> M.Matrix [Tile] -> Maybe (M.Matrix [Tile])
+mapFirstJust :: (a -> Maybe b) -> [a] -> Maybe b
+mapFirstJust _ [] = Nothing
+mapFirstJust func (e:rest)
+  | Mb.isJust . func $ e = func e
+  | otherwise = mapFirstJust func rest
+
+collapseWith :: TileMatcher -> M.Matrix [ImageId] -> Maybe (M.Matrix [ImageId])
 collapseWith tileMatcher tileMap
   | null toCollapse          = Nothing
   | null . tail $ toCollapse = Just tileMap
   | otherwise = 
-    CM.join . 
-    L.find Mb.isJust $ 
-    map (\e -> (M.safeSet [e] indexToCollapse tileMap) >>= (collapseWith tileMatcher . updateWith tileMatcher)) toCollapse
+    mapFirstJust (\e -> (M.safeSet [e] indexToCollapse tileMap) >>= (collapseWith tileMatcher . updateWith tileMatcher)) toCollapse
     where lengthFunction t = (\a -> if a == 1 then 9999 else a) . length $ t
           (toCollapse, indexToCollapse) = getMin0Matrix lengthFunction tileMap
 
@@ -198,10 +200,10 @@ makeLookupMap tm = complete
 allTiles :: (Eq a) => [((a,a), [Side])] -> [a]
 allTiles input = L.nub (input >>= ((\a -> [fst a, snd a]) . fst))
 
-match :: TileMatcher -> Side -> Tile -> Tile -> Bool
+match :: TileMatcher -> Side -> ImageId -> ImageId -> Bool
 match mtrx side im1 im2 = elem side (mtrx M.! ((im1 + 1), (im2 + 1)))
 
-makeTileMatcher :: [((Tile, Tile), [Side])] -> TileMatcher
+makeTileMatcher :: [((ImageId, ImageId), [Side])] -> TileMatcher
 makeTileMatcher lookupList = mtrx
   where size = length . allTiles $ lookupList
         mtrx = M.matrix size size (\(x,y) -> maybe [] id $ lookup ((x - 1), (y - 1)) lookupList) 
