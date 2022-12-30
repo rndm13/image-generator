@@ -40,7 +40,7 @@ main = do
 
     CM.when (take 3 mode == "gen") $ do
 
-      let gen = if | drop 3 mode == "R" -> genImage t (inputImages >>= map (mergeImageMap . fmap L.singleton) .  allRotations .  splitImageMap sz ) sz width height
+      let gen = if | drop 3 mode == "R" -> genImage t (inputImages >>= allRotations) sz width height
                    | otherwise          -> genImage t inputImages sz width height
 
       handle <- SIO.openFile "generatedImage.ppm" SIO.WriteMode
